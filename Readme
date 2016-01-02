@@ -1,0 +1,99 @@
+~~~~~~~~~~~~~~~~~~~~~~~ Reliable UDP based File Server and Client ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Header design:
+
+<--------------------------32 bits-------------------------->
+-------------------------------------------------------------
+|              		   Sequence number                      |
+-------------------------------------------------------------
+|					Acknowledgment Number              		|
+-------------------------------------------------------------
+|   Ack Flag   |   Fin Flag   |         Data Length         |
+-------------------------------------------------------------
+
+ Total Header Length: 12 bytes
+4 Bytes Sequence Number 
+4 Bytes Acknowledgment Number
+1 byte Ack Flag
+1 byte Fin Flag
+2 Bytes data length
+
+How to run the server?
+•	Navigate to Server/Debug
+•	Run “make clean;make all”
+•	Run “./UdpFileServer 8080 100”    
+	where, 8080 should be replaced with the port number to which server has to listen, 100 should be replaced by the receiver window value(should be in consistent with client)
+
+Log file name: rudpserver.log 
+Log file will give date , time and more details on the packets sent/acks received
+
+How to run the client?
+•	Navigate to  UdpFileClient/Debug
+•	Run “make clean;make all”
+•	Run “./UdpFileClient localhost 8080 subtitleFile.txt 100 3 20”
+	where,
+ 		8080 -> port number
+		subtitleFile.txt -> requested file
+		100 -> receiver window(should be same as server)
+		3 -> Drop/Delay param (0-no drop/delay, 1-drop, 2-delay, 3- drop and delay)
+		20-> drop/delay percentage
+
+Log file name: rudpclient.log 
+Log file will give date , time and more details on the ack sent/packets recieved
+
+
+Significance of each Data in the header:
+1.	Sequence Number indicates the sequence of the packet in the steam. It is initial sequence number + start byte of the current packet. This is mainly sent by sender to the receiver.
+2.	Ack Number is the Sequence number of the next packet that the receiver is expecting to receive. This is always used in conjunction with ack Flag.
+3.	Ack Flag is used if this is an ACK packet. This is set along with Ack Number.
+4.	Fin flag is used to indicate if this is the packet that will be sent from sender to the receiver. After successfully receiving this the receiver can terminate the connection.
+5.	Data length is the number of bytes in the data section of the Packet.
+
+
+Server design:
+	Classes:
+1.	MainClass : This is the main class which contains main function which invokes UdpServer class to instantiate the FileServer.
+2.	UdpServer: 
+a.	startServer : opens a socket and binds to the expected port number
+b.	openFile: used to open the requested file to be read
+c.	startFileTransfer: does fileLength calculations and starts the file transfer
+d.	send: core part of the program where congestion control and flow control is handled including the state changes between slow start and congestion avoidance.
+e.	sendPacket: used to create and send a packet from start byte and given sequence number
+f.	waitForAck: when called, will process one ACK packet and puts updates the sliding window, send base accordingly
+g.	calculateRttAndTime: It calculates the Sample RTT, Estimated RTT, DevRTT and Estimated Timeout using Jacobson/Karels algorithm.
+h.	retransmitSegmentAt: is a function used for the packet retransmission at the specified start byte.
+i.	readFileAndSend : is used to read the file from the FileSystem starting from the specified start byte and length, create a datagram and push in onto the network.
+j.	getRequest: is used to fetch the file transfer requests from the clients.
+k.	sendDatagram: used to send the datagram to the network including the header and data.
+3.SlidingWindow: This class contains variable and pointer needed to track and hold the Sliding window. It uses vector as the data structure. 
+Member variables:
+	a. lastPacketSent holds the index of last sent packet
+	b. lastAckedPacket holds the index of last acked packet
+Functions:
+a.	addToBuffer:  Adds the sliding window entry to the vector and returns the index.
+
+4. SlidingWindowBuffer: Whenever a packet is sent an entry is made to keep track of the packets and this constitutes the sliding window.
+5. Datagram: This is the conceptual packet of the program.
+	Important functions:
+a.	deserializeToDatagram: This will convert the char array as received from the network into the datagram object to be processed by the program.
+b.	serializeToCharArray: converts datagram object to char array to be sent into the network.
+6. Logger: This is a class used for logging purposes.
+
+
+Receiver(Client) Design:
+
+Classes:
+1.	Client Class: This is the main class which sends the file request and receives the packets. This also buffers any out-of-order packets by placing in the appropriate position in the vector. It discards the packet if the lastInOrder packet index and lastPacketReceived difference exceeds the receiver window. Acknowledgments will be sent for each packet received.
+2.	Datagram class is same as in the server.
+3.	Logger: This is a class used for logging purposes.
+
+Out of order packet processing logic:
+	The arriving packet’s location in the vector is found out by (nextSequenceExpected – datagram->seqNo)/MSS and then checked if this new segment’s index exceeds the receiver, and dropped if it exceeds, then accept the packet and place it into the appropriate position(buffer) as seen in insertAt() function. Null Datagrams will be placed if there are gaps in between. Now start moving lastInOrderPacket index until it reaches a null Datagram and write to the file/application till here.
+
+Server will print statistics of each run at the end in the below format:
+Total Time taken 6.02646 secs
+Final stats:: Tx Slow start 106 CongAvd 577
+Final stats:: Slow start %15.5198 CongAvd %84.4802
+Final stats:: Retransmissions 165
+
+
